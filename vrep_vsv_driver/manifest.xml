@@ -1,0 +1,17 @@
+<package>
+  <description brief="vrep_vsv_driver">
+
+     vrep_vsv_driver
+
+  </description>
+  <author>Cedric Pradalier</author>
+  <license>BSD</license>
+  <review status="unreviewed" notes=""/>
+  <url>http://ros.org/wiki/vrep_vsv_driver</url>
+  <depend package="rospy"/>
+  <depend package="sensor_msgs"/>
+  <depend package="tf"/>
+
+</package>
+
+
