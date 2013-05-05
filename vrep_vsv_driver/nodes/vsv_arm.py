@@ -25,7 +25,7 @@ class VSVDriver:
         self.ready = False
         self.connected = False
         self.joint_names = [ "ArmPan",  "ArmTilt",  "ArmFold",  "ArmExtend",  "ToolRotate"]
-        self.min_value = {"ArmPan":-pi/2, "ArmTilt":0.0, "ArmFold":-pi/2,
+        self.min_value = {"ArmPan":-pi/2, "ArmTilt":-pi/6, "ArmFold":-pi/2,
                 "ArmExtend":0.0, "ToolRotate":-pi/2}
         self.max_value = {"ArmPan":pi/2, "ArmTilt":pi/2, "ArmFold":pi/2,
                 "ArmExtend":1.0, "ToolRotate":pi/2}

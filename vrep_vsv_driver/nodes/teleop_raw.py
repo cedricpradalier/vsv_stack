@@ -34,15 +34,10 @@ def talker():
     global joy_value
     global last_joy
     global joint_state
-    rospy.init_node('vrep_ros_teleop')
+    rospy.init_node('vsv_arm_teleop_raw')
     sub = rospy.Subscriber('~joy', Joy, joy_cb)
     jsub = rospy.Subscriber('~joint_state', JointState, joint_cb)
     joint = rospy.Publisher('~joint_command', JointState)
-    pub = rospy.Publisher('~twistCommand', Twist)
-    axis_linear = rospy.get_param("~axis_linear",1)
-    axis_angular = rospy.get_param("~axis_angular",0)
-    scale_linear = rospy.get_param("~scale_linear",1.)
-    scale_angular = rospy.get_param("~scale_angular",1.)
     axis={}
     axis["ArmPan"] = [int(s) for s in str(rospy.get_param("~axis_pan","6")).split(",")]
     axis["ArmTilt"] = [int(s) for s in str(rospy.get_param("~axis_tilt","7")).split(",")]
@@ -65,16 +60,10 @@ def talker():
     command.position = [x for x in joint_state.position]
     index = dict(zip(command.name,range(0,len(command.name))))
     while not rospy.is_shutdown():
-        twist = Twist()
-        if not joint_state:
-            rate.sleep()
-            continue
         if (rospy.rostime.get_time() - last_joy) < 0.5: 
             if timeout:
                 timeout = False
                 rospy.loginfo("Accepting joystick commands")
-            twist.linear.x = joy_value.axes[axis_linear] * scale_linear
-            twist.angular.z = joy_value.axes[axis_angular] * scale_angular
             for k in axis.keys():
                 if len(axis[k])==1:
                     # Axis
@@ -96,7 +85,6 @@ def talker():
                 timeout = True
                 rospy.loginfo("Timeout: ignoring joystick commands")
         joint.publish(command)
-        pub.publish(twist)
         rate.sleep()
 
 
