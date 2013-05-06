@@ -42,7 +42,7 @@ class VSVArmIK:
         self.listener = tf.TransformListener()
         rospy.sleep(1.0) # Necessary to let the TF arrive
         while not rospy.is_shutdown() and not self.joint_state:
-            rate.sleep()
+            rospy.sleep(0.1)
         if rospy.is_shutdown():
             return
         ((a,b,c),_) = self.listener.lookupTransform('/%s/ArmPan'%(self.name),

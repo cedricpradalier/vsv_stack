@@ -1,0 +1,27 @@
+<launch>
+
+  <node pkg="roadside_mapper" type="floor_projector.py" name="floor_projector" output="screen">
+      <param name="floor_size_pix" value="500"/>
+      <param name="horizon_offset_pix" value="-128"/>
+      <param name="vertical_offset_pix" value="-250"/>
+      <param name="floor_size_meter" value="7.0"/>
+      <param name="target_frame" value="/VSV/ArmPan"/>
+      <remap from="/floor_projector/probabilities" to="/vrep/visionSensor"/>
+      <remap from="/floor_projector/info" to="/vrep/visionSensorInfo"/>
+  </node>
+
+  <node pkg="roadside_mapper" type="find_black_line" name="find_black_line" output="screen">
+      <param name="projected_floor_size_meter" value="7.0"/>
+      <param name="search_offset_forward_pix" value="125"/>
+      <param name="search_offset_lateral_pix" value="90"/>
+      <param name="search_length" value="180"/>
+      <param name="image_origin_x" value="0.0"/>
+      <param name="image_origin_y" value="0.0"/>
+      <remap from="/find_black_line/projection" to="/floor_projector/floor"/>
+  </node>
+
+  <node pkg="roadside_mapper" type="track_black_line.py" name="track_black_line" output="screen">
+      <param name="z_track" value="-0.7"/>
+      <param name="z_idle" value="0.0"/>
+  </node>
+</launch>
