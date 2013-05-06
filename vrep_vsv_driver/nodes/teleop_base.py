@@ -11,10 +11,7 @@ joy_value = None
 
 
 def joy_cb(value):
-    global joy_value, last_joy, joint_state
-    if not joint_state:
-        # Ignoring joystick while we don't have the joint_state
-        return
+    global joy_value, last_joy
     last_joy = rospy.rostime.get_time()
     joy_value = value
 

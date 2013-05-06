@@ -18,12 +18,15 @@
       <remap from="/teleop_base/twistCommand" to="/vsv_driver/twistCommand"/>
   </node>
 
-  <node pkg="vrep_vsv_driver" type="teleop_raw.py" name="teleop" output="screen">
-      <param name="axis_pan" value="6"/>
-      <param name="axis_tilt" value="7"/>
-      <param name="axis_fold" value="4,5"/>
-      <param name="axis_extend" value="0,3"/>
-      <param name="axis_rotate" value="2,1"/>
+  <node pkg="vrep_vsv_driver" type="teleop_ik.py" name="teleop" output="screen">
+      <param name="vsv_name" value="VSV"/>
+      <param name="axis_arm_x" value="3"/>
+      <param name="axis_arm_y" value="6"/>
+      <param name="axis_arm_z" value="7"/>
+      <param name="arm_step" value="0.02"/>
+      <param name="home_button" value="1"/>
+      <param name="ready_button" value="0"/>
+      <param name="move_button" value="2"/>
       <remap from="/teleop/joy" to="/joy"/>
       <remap from="/teleop/joint_command" to="/VSV/aggregated/command"/>
       <remap from="/teleop/joint_state" to="/VSV/aggregated/state"/>
