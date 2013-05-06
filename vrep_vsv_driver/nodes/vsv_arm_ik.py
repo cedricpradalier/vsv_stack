@@ -150,12 +150,14 @@ class VSVArmIK:
                     if not timeout:
                         timeout = True
                         rospy.loginfo("Timeout: ignoring twist commands")
+            state = self.joint_state.position[self.index["ToolRotate"]]
             (_,rot) = self.listener.lookupTransform('/%s/Tool'%(self.name),
                     '/%s/ArmPan'%(self.name), rospy.Time(0))
             euler = euler_from_quaternion(rot)
-            error = angle(euler[0]-self.tool_orientation)
-            # print (euler[0], euler[0]*180./pi, error)
-            self.command.position[self.index["ToolRotate"]] += 0.1*error
+            command = state+angle(euler[0]-self.tool_orientation)
+            # print (euler[0], self.tool_orientation, command, state)
+            # self.command.position[self.index["ToolRotate"]] += 0.1*error
+            self.command.position[self.index["ToolRotate"]] = command
             self.joint.publish(self.command)
             rate.sleep()
 

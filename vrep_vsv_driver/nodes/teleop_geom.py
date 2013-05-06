@@ -47,7 +47,7 @@ class TeleopIK:
                         rospy.loginfo("Homing");
                     state = "Homing"
                     self.tool_pub.publish(Float32(0.0))
-                    self.pose_pub.publish(Point(1.0,0.0,0.3))
+                    self.pose_pub.publish(Point(0.8,0.0,0.3))
                 if (state == "Ready") or (self.joy_value.buttons[self.ready_button]):
                     if state != "Ready":
                         rospy.loginfo("Getting ready");
