@@ -30,7 +30,7 @@
       <param name="axis_arm_x" value="3"/>
       <param name="axis_arm_y" value="6"/>
       <param name="axis_arm_z" value="4"/>
-      <param name="arm_velocity" value="0.5"/>
+      <param name="arm_velocity" value="0.25"/>
       <param name="home_button" value="1"/>
       <param name="ready_button" value="0"/>
       <param name="move_button" value="2"/>

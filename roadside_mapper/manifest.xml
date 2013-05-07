@@ -16,6 +16,8 @@
   <depend package="sensor_msgs"/>
   <depend package="geometry_msgs"/>
   <depend package="tf"/>
+  <depend package="bsplines"/>
+  <depend package="cgnuplot"/>
 
 </package>
 

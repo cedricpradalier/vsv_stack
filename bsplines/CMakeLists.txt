@@ -7,7 +7,8 @@ include($ENV{ROS_ROOT}/core/rosbuild/rosbuild.cmake)
 #  Release        : w/o debug symbols, w/ optimization
 #  RelWithDebInfo : w/ debug symbols, w/ optimization
 #  MinSizeRel     : w/o debug symbols, w/ optimization, stripped binaries
-set(ROS_BUILD_TYPE Debug)
+#set(ROS_BUILD_TYPE RelWithDebInfo)
+set(ROS_BUILD_TYPE Release)
 
 rosbuild_init()
 
@@ -22,10 +23,27 @@ set(LIBRARY_OUTPUT_PATH ${PROJECT_SOURCE_DIR}/lib)
 #rosbuild_gensrv()
 
 #common commands for building c++ executables and libraries
-#rosbuild_add_library(${PROJECT_NAME} src/example.cpp)
-#target_link_libraries(${PROJECT_NAME} another_library)
+rosbuild_add_library(${PROJECT_NAME} 
+    src/BSpline.cpp
+    src/Function.cpp
+    src/SplinePath.cpp
+    src/SplineRegister.cpp
+)
+target_link_libraries(${PROJECT_NAME} gsl gslcblas)
 #rosbuild_add_boost_directories()
 #rosbuild_link_boost(${PROJECT_NAME} thread)
-rosbuild_add_executable(floor_mapper src/floor_mapper.cpp)
-#target_link_libraries(example ${PROJECT_NAME})
-rosbuild_add_executable(find_black_line src/find_black_line.cpp)
+
+rosbuild_add_executable(test1 test/test.cpp)
+target_link_libraries(test1 ${PROJECT_NAME})
+
+rosbuild_add_executable(testsp test/testsp.cpp)
+target_link_libraries(testsp ${PROJECT_NAME})
+
+rosbuild_add_executable(optimsp test/optimsp.cpp)
+target_link_libraries(optimsp ${PROJECT_NAME})
+
+rosbuild_add_executable(function test/function.cpp)
+target_link_libraries(function ${PROJECT_NAME})
+
+rosbuild_add_executable(travmaps test/travmaps.cpp)
+target_link_libraries(travmaps ${PROJECT_NAME})

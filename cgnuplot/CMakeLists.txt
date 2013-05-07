@@ -7,7 +7,7 @@ include($ENV{ROS_ROOT}/core/rosbuild/rosbuild.cmake)
 #  Release        : w/o debug symbols, w/ optimization
 #  RelWithDebInfo : w/ debug symbols, w/ optimization
 #  MinSizeRel     : w/o debug symbols, w/ optimization, stripped binaries
-set(ROS_BUILD_TYPE Debug)
+#set(ROS_BUILD_TYPE RelWithDebInfo)
 
 rosbuild_init()
 
@@ -21,11 +21,23 @@ set(LIBRARY_OUTPUT_PATH ${PROJECT_SOURCE_DIR}/lib)
 #uncomment if you have defined services
 #rosbuild_gensrv()
 
+add_definitions(-g -ggdb -O0)
+
 #common commands for building c++ executables and libraries
-#rosbuild_add_library(${PROJECT_NAME} src/example.cpp)
-#target_link_libraries(${PROJECT_NAME} another_library)
+rosbuild_add_library(${PROJECT_NAME} 
+	src/CGnuplot.cpp
+	src/CGnuplotSurfaceGrapher.cpp
+	src/CShell.cpp)
+target_link_libraries(${PROJECT_NAME})
+
 #rosbuild_add_boost_directories()
 #rosbuild_link_boost(${PROJECT_NAME} thread)
-rosbuild_add_executable(floor_mapper src/floor_mapper.cpp)
-#target_link_libraries(example ${PROJECT_NAME})
-rosbuild_add_executable(find_black_line src/find_black_line.cpp)
+
+rosbuild_add_executable(test_cgnuplot src/test.cpp)
+target_link_libraries(test_cgnuplot ${PROJECT_NAME})
+
+rosbuild_add_executable(test_movie src/test_movie.cpp)
+target_link_libraries(test_movie ${PROJECT_NAME})
+
+rosbuild_add_executable(test_surf src/test_surf.cpp)
+target_link_libraries(test_surf ${PROJECT_NAME})

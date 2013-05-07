@@ -10,7 +10,8 @@
       <remap from="/floor_projector/info" to="/vrep/visionSensorInfo"/>
   </node>
 
-  <node pkg="roadside_mapper" type="find_black_line" name="find_black_line" output="screen">
+  <ignore launch-prefix="gdb -ex run --args"/>
+  <node pkg="roadside_mapper" type="find_black_line" name="find_black_line" output="screen" >
       <param name="projected_floor_size_meter" value="7.0"/>
       <param name="search_offset_forward_pix" value="125"/>
       <param name="search_offset_lateral_pix" value="90"/>
@@ -18,6 +19,7 @@
       <param name="image_origin_x" value="0.0"/>
       <param name="image_origin_y" value="0.0"/>
       <remap from="/find_black_line/projection" to="/floor_projector/floor"/>
+      <remap from="/find_black_line/odom" to="/odom/odom"/>
   </node>
 
   <node pkg="roadside_mapper" type="track_black_line.py" name="track_black_line" output="screen">
@@ -41,7 +43,7 @@
   <node pkg="vrep_vsv_driver" type="teleop_base.py" name="teleop_base" output="screen">
       <param name="axis_linear" value="1" type="int"/>
       <param name="axis_angular" value="0" type="int"/>
-      <param name="scale_linear" value="1.0" type="double"/>
+      <param name="scale_linear" value="3.0" type="double"/>
       <param name="scale_angular" value="0.7" type="double"/>
       <remap from="/teleop_base/joy" to="/joy"/>
       <remap from="/teleop_base/twistCommand" to="/vsv_driver/twistCommand"/>
@@ -56,10 +58,14 @@
 
   <node pkg="vrep_vsv_driver" type="vsv_driver.py" name="vsv_driver" output="screen">
       <param name="vsv_name" value="VSV"/>
-      <param name="min_radius" value="5.0"/>
+      <param name="min_radius" value="3.0"/>
   </node>
 
   <node pkg="vrep_vsv_driver" type="vsv_arm.py" name="vsv_arm" output="screen">
+      <param name="vsv_name" value="VSV"/>
+  </node>
+
+  <node pkg="vrep_vsv_driver" type="vsv_odom.py" name="odom" output="screen">
       <param name="vsv_name" value="VSV"/>
   </node>
 
