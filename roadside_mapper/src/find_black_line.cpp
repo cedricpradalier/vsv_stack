@@ -96,7 +96,7 @@ class FloorMapper {
                 // discard any data further than 1m behind
                 line = transformed_line.select(-1,line.xmax());
                 line.print("/tmp/line");
-                plot.plot("plot [-1:1.80] \"/tmp/line\" u 1:2 w lp");
+                plot.plot("plot [-1:1.80][1:3.80] \"/tmp/line\" u 1:2 w lp");
             }
             received_odom = true;
             last_odom = odom;

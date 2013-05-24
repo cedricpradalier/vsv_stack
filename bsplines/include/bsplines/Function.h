@@ -254,6 +254,12 @@ namespace splines {
             {
                 TFunction<C> res;
                 if (empty()) return res;
+                double min = xmin();
+                double max = xmax();
+                if (x1 < min) return res;
+                if (x0 > max) return res;
+                if (x0 < min) x0 = min;
+                if (x1 > max) x1 = max;
                 typename FDB::const_iterator it0 = vals.lower_bound(x0);
                 typename FDB::const_iterator it1 = vals.upper_bound(x1);
                 res.set(x0,this->operator()(x0));
