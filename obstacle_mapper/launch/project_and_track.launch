@@ -1,11 +1,79 @@
 <launch>
 
+  <node pkg="roadside_mapper" type="floor_projector.py" name="floor_projector" output="screen">
+      <param name="floor_size_pix" value="500"/>
+      <param name="horizon_offset_pix" value="-128"/>
+      <param name="vertical_offset_pix" value="-250"/>
+      <param name="floor_size_meter" value="7.0"/>
+      <param name="target_frame" value="/VSV/ArmPan"/>
+      <remap from="/floor_projector/probabilities" to="/vrep/visionSensor"/>
+      <remap from="/floor_projector/info" to="/vrep/visionSensorInfo"/>
+  </node>
 
   <ignore launch-prefix="gdb -ex run --args"/>
+  <node pkg="roadside_mapper" type="find_black_line" name="find_black_line" output="screen" >
+      <param name="projected_floor_size_meter" value="7.0"/>
+      <param name="search_offset_forward_pix" value="125"/>
+      <param name="search_offset_lateral_pix" value="90"/>
+      <param name="search_length" value="180"/>
+      <param name="image_origin_x" value="0.0"/>
+      <param name="image_origin_y" value="0.0"/>
+      <remap from="/find_black_line/projection" to="/floor_projector/floor"/>
+      <remap from="/find_black_line/odom" to="/odom/odom"/>
+  </node>
+
+  <node pkg="roadside_mapper" type="track_black_line.py" name="track_black_line" output="screen">
+      <param name="z_track" value="-0.5"/>
+      <param name="z_idle" value="0.0"/>
+      <param name="x_offset" value="0.5"/>
+      <remap from="/track_black_line/position_command" to="/obstacle_mapper/position_desired"/>
+      <remap from="/track_black_line/tool_command" to="/arm_ik/tool_orientation"/>
+      <remap from="/track_black_line/black_line" to="/find_black_line/detection"/>
+  </node>
+
   <node pkg="obstacle_mapper" type="obstacle_mapper" name="obstacle_mapper" output="screen" >
       <param name="target_frame" value="/VSV/ArmPan"/>
       <remap from="/obstacle_mapper/scan" to="/vrep/hokuyoSensor"/>
       <remap from="/obstacle_mapper/odom" to="/odom/odom"/>
+      <remap from="/obstacle_mapper/position_command" to="/arm_ik/position"/>
+  </node>
+
+ <!-- joy node -->
+  <node respawn="false" pkg="joy" type="joy_node" name="joy" >
+    <!-- <param name="dev" type="string" value="/dev/input/js0" /> -->
+    <!-- <param name="deadzone" value="0.12" /> -->
+    <param name="autorepeat_rate" value="10.0" />
+  </node>
+
+ <!-- Axes -->
+
+  <node pkg="vrep_vsv_driver" type="teleop_base.py" name="teleop_base" output="screen">
+      <param name="axis_linear" value="1" type="int"/>
+      <param name="axis_angular" value="3" type="int"/>
+      <param name="scale_linear" value="2.0" type="double"/>
+      <param name="scale_angular" value="0.7" type="double"/>
+      <remap from="/teleop_base/joy" to="/joy"/>
+      <remap from="/teleop_base/twistCommand" to="/vsv_driver/twistCommand"/>
+  </node>
+
+  <node pkg="vrep_vsv_driver" type="vsv_arm_ik.py" name="arm_ik" output="screen">
+      <param name="vsv_name" value="VSV"/>
+      <param name="max_velocity" value="0.5"/>
+      <remap from="/arm_ik/joint_command" to="/VSV/aggregated/command"/>
+      <remap from="/arm_ik/joint_state" to="/VSV/aggregated/state"/>
+  </node>
+
+  <node pkg="vrep_vsv_driver" type="vsv_driver.py" name="vsv_driver" output="screen">
+      <param name="vsv_name" value="VSV"/>
+      <param name="min_radius" value="3.0"/>
+  </node>
+
+  <node pkg="vrep_vsv_driver" type="vsv_arm.py" name="vsv_arm" output="screen">
+      <param name="vsv_name" value="VSV"/>
+  </node>
+
+  <node pkg="vrep_vsv_driver" type="vsv_odom.py" name="odom" output="screen">
+      <param name="vsv_name" value="VSV"/>
   </node>
 
 </launch>

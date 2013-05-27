@@ -15,6 +15,8 @@
 #include <geometry_msgs/PointStamped.h>
 
 #include <cgnuplot/CGnuplot.h>
+#include <opencv2/opencv.hpp>
+#include <opencv2/highgui/highgui.hpp>
 
 
 class ObstacleMapper {
@@ -22,6 +24,8 @@ class ObstacleMapper {
         ros::NodeHandle nh_;
         ros::Subscriber pc_sub_;
         ros::Subscriber odom_sub_;
+        ros::Publisher arm_target_pub_;
+        ros::Subscriber arm_target_sub_;
 
         tf::TransformListener listener_;
 
@@ -39,6 +43,8 @@ class ObstacleMapper {
         typedef std::multimap<float,tf::Vector3> MapType;
         MapType map;
 
+        cv::Mat_<uint8_t> proj_occupancy;
+        float z_offset;
 
     public:
         ObstacleMapper() : nh_("~") {
@@ -47,16 +53,18 @@ class ObstacleMapper {
 
             first_odom = true;
             received_odom = false;
+            ros::Duration(1.0).sleep();
             pc_sub_ = nh_.subscribe<sensor_msgs::PointCloud2>("scan",1, &ObstacleMapper::pc_callback,this);
             odom_sub_ = nh_.subscribe("odom",1,&ObstacleMapper::odom_callback,this);
+            arm_target_sub_ = nh_.subscribe("position_desired",1,&ObstacleMapper::target_callback,this);
+            arm_target_pub_ = nh_.advertise<geometry_msgs::Point>("position_command",1);
 
-            ros::Duration(0.5).sleep();
-            ros::Time now = ros::Time::now();
 
             Delta.setIdentity();
 
             // To move the odometry estimation to the arm base
-            listener_.waitForTransform("/VSV/base",target_frame,now,ros::Duration(1.0));
+            ros::Time now = ros::Time::now();
+            listener_.waitForTransform("/VSV/base",target_frame,now,ros::Duration(3.0));
             listener_.lookupTransform("/VSV/base",target_frame,now, base_tf);
 
             // Now prepare the transformation between laser and the ground
@@ -75,8 +83,11 @@ class ObstacleMapper {
                     x0,y0,z0,a,b,c);
             d = -(a*x0+b*y0+c*z0);
             ROS_INFO("Laser plane is %.3fx + %.3fy + %.3fz + %.3f = 0",a,b,c,d);
-            // tolerance: projection of horizontal half cell size to the laser plane, plus 25%)
 
+
+            z_offset = -base_tf.getOrigin().getZ();
+            ROS_INFO("Z Offset: %.3f",z_offset);
+            proj_occupancy = cv::Mat_<uint8_t>(100,100,(uint8_t)0x00);
         }
 
         void odom_callback(const geometry_msgs::PoseStampedConstPtr& msg) {
@@ -107,7 +118,7 @@ class ObstacleMapper {
             pcl_ros::transformPointCloud(target_frame,msg->header.stamp, temp, msg->header.frame_id, pc, listener_);
 
             float ds = hypot(Delta.getOrigin().getX(),Delta.getOrigin().getY());
-            ROS_INFO("Delta %.3f : %.4f %.4f %.4f",ds,Delta.getOrigin().getX(),Delta.getOrigin().getY(),tf::getYaw(Delta.getRotation())*180./M_PI);
+            // ROS_INFO("Delta %.3f : %.4f %.4f %.4f",ds,Delta.getOrigin().getX(),Delta.getOrigin().getY(),tf::getYaw(Delta.getRotation())*180./M_PI);
             if (ds > 1e-1) {
                 MapType new_map;
                 for (MapType::iterator it=map.begin();it!=map.end();it++) {
@@ -137,6 +148,9 @@ class ObstacleMapper {
                     // ROS_INFO("New point p=%.3f",a*x+b*y+c*z+d);
                     if (d2 < 5e-2) {
                         // Bogus point, ignore
+                        pc[i].x=NAN;
+                        pc[i].y=NAN;
+                        pc[i].z=NAN;
                         continue;
                     }
                     if ((y>0.)||(y<-10.)||(z>10.)) { // TODO: set a param
@@ -146,9 +160,97 @@ class ObstacleMapper {
                     map.insert(MapType::value_type(x,tf::Vector3(x,y,z)));
                 }
             }
+            proj_occupancy = 0xFF;
+            for (MapType::iterator it=map.begin();it!=map.end();it++) {
+                if ((it->first < -0.5) || (it->first > 1.5)) { // TODO: set a param, use upper_bound
+                    // We only consider forward collision possibilities
+                    continue;
+                }
+                float y,z;
+                const tf::Vector3  & v = it->second; 
+                y = v.getY(); z = v.getZ();
+                int i = (int)round(-y/0.1);
+                int j = (int)round((z-z_offset)/0.1);
+                // ROS_INFO("PC: %.3f %.3f -> %d %d",y,z,i,j);
+                if ((i<0) || (i>=proj_occupancy.cols) || (j<0) || (j>=proj_occupancy.rows)) {
+                    continue;
+                }
+                proj_occupancy(proj_occupancy.rows-j-1,i) = 0x00;
+            }
+            unsigned int n = pc.size();
+            for (unsigned int i=0;i<n;i++) {
+                float d2 = temp[i].x*temp[i].x+temp[i].y*temp[i].y+temp[i].z*temp[i].z;
+                if (d2 < 5e-2) {
+                    continue;
+                }
+                float x,y,z;
+                x = pc[i].x; y = pc[i].y; z = pc[i].z;
+                if ((x<-0.5) || (x>1.5)) { // TODO set a param
+                    continue;
+                }
+                int i = (int)round(-y/0.1);
+                int j = (int)round((z-z_offset)/0.1);
+                if ((i<0) || (i>=proj_occupancy.cols) || (j<0) || (j>=proj_occupancy.rows)) {
+                    continue;
+                }
+                proj_occupancy(proj_occupancy.rows-j-1,i) = 0x00;
+            }
+            int erosion_type = cv::MORPH_RECT ;
+            cv::Mat element = cv::getStructuringElement(erosion_type,
+                    cv::Size(15,5), cv::Point( 7, 2));
+            cv::erode( proj_occupancy, proj_occupancy, element );
+            cv::imshow( "OccGrid", proj_occupancy );
             ros::Time tn = ros::Time::now();
-            ROS_INFO("Point-cloud processing: %d points %f ms",(int)map.size(),(tn-t0).toSec()*1000);
-            plot_map();
+            // ROS_INFO("Point-cloud processing: %d points %f ms",(int)map.size() + n,(tn-t0).toSec()*1000);
+            // plot_map();
+        }
+
+        void target_callback(const geometry_msgs::PointConstPtr & msg) {
+            static bool warning_printed = false;
+            if (fabs(msg->y) > 0.1) {
+                if (!warning_printed) {
+                    ROS_WARN("Obstacle avoidance not tuned for y arm position different from zero");
+                }
+                warning_printed = true;
+                return;
+            }
+            ros::Time now = ros::Time::now();
+            listener_.waitForTransform(target_frame,"/VSV/ArmPan",now,ros::Duration(1.0));
+            geometry_msgs::PointStamped Pin, Pout;
+            geometry_msgs::Point P;
+            Pin.point = *msg;
+            Pin.header.frame_id = "/VSV/ArmPan";
+            Pin.header.stamp = now;
+            listener_.transformPoint(target_frame, Pin, Pout);
+            // ROS_INFO("Target at %.2f %.2f",Pout.point.x,Pout.point.z);
+            P = Pout.point;
+            cv::Mat_<float> score(proj_occupancy.size(),128.0);
+
+            int ibest=-1,jbest=-1;
+            float bestscore = 0;
+            for (int j=0;j<score.rows;j++) {
+                for (int i=0;i<score.cols;i++) {
+                    if (proj_occupancy(j,i)==0) {
+                        score(j,i) = 0;
+                    } else {
+                        // score(j,i) = 0xFF*exp(-0.5*hypot(5.0*(P.x-i/0.1), 1.0*(P.z-(100.-j)/0.1))/10.);
+                        float x=i*0.1, z=z_offset + (score.rows-j)*0.1;
+                        float dx = P.x-x, dz = P.z - z;
+                        // ROS_INFO("%d %d -> %.2f %.2f -> %.2f %.2f",i,j,x,z,dx,dz);
+                        score(j,i) = exp(-hypot(3.0*dx, 1.0*dz)/10);
+                        if (score(j,i)>bestscore) {
+                            bestscore = score(j,i);
+                            ibest = i;
+                            jbest = j;
+                        }
+                    }
+                }
+            }
+            P.x = ibest * 0.1;
+            P.y = 0.0;
+            P.z = z_offset + (score.rows-jbest)*0.1;
+            arm_target_pub_.publish(P);
+            cv::imshow( "Scores", score );
         }
         
         void plot_map() {
@@ -169,10 +271,15 @@ class ObstacleMapper {
 
 int main(int argc, char *argv[]) {
     ros::init(argc,argv,"obstacle_mapper");
+    cv::namedWindow( "OccGrid", CV_WINDOW_AUTOSIZE );
+    cv::namedWindow( "Scores", CV_WINDOW_AUTOSIZE );
 
     ObstacleMapper fm;
 
-    ros::spin();
+    while (ros::ok()) {
+        ros::spinOnce();
+        cv::waitKey(10);
+    }
 
     return 0;
 }

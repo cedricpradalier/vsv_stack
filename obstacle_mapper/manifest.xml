@@ -16,6 +16,9 @@
   <depend package="cgnuplot"/>
   <depend package="pcl_ros"/>
   <depend package="bsplines"/>
+  <depend package="opencv2"/>
+  <depend package="image_transport"/>
+  <depend package="cv_bridge"/>
 
 </package>
 
