@@ -3,7 +3,7 @@
 
   <ignore launch-prefix="gdb -ex run --args"/>
   <node pkg="obstacle_mapper" type="obstacle_mapper" name="obstacle_mapper" output="screen" >
-      <param name="target_frame" value="/VSV/mowing"/>
+      <param name="target_frame" value="/VSV/ArmPan"/>
       <remap from="/obstacle_mapper/scan" to="/vrep/hokuyoSensor"/>
       <remap from="/obstacle_mapper/odom" to="/odom/odom"/>
   </node>

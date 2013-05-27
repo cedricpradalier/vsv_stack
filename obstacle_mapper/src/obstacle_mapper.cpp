@@ -14,12 +14,8 @@
 #include <sensor_msgs/PointCloud2.h>
 #include <geometry_msgs/PointStamped.h>
 
-#include <bsplines/Function.h>
 #include <cgnuplot/CGnuplot.h>
-#include "obstacle_mapper/ColumnCell.h"
-#include "obstacle_mapper/LocalMap.h"
 
-using namespace obstacle_mapper;
 
 class ObstacleMapper {
     protected:
@@ -30,31 +26,24 @@ class ObstacleMapper {
         tf::TransformListener listener_;
 
         std::string target_frame;
+        float a,b,c,d; // Parameter of the laser plane
 
         bool received_odom, first_odom;
+        pcl::PointCloud<pcl::PointXYZ> pc;
         tf::Pose last_odom,odom;
         tf::StampedTransform base_tf,hokuyo_tf;
         tf::Transform hokuyo_inv_tf;
         tf::Transform Delta;
         cgnuplot::CGnuplot plot;
 
-        boost::shared_ptr<LocalMap> map;
-
-        size_t x_size, y_size, z_size;
-        float x_origin, y_origin, z_origin;
-        float horizontal_resolution, vertical_resolution;
-        std::vector<float> laser_height;
-        std::vector<LevelType> occupancy;
-        float laser_tolerance;
-        
+        typedef std::multimap<float,tf::Vector3> MapType;
+        MapType map;
 
 
     public:
-        ObstacleMapper() : nh_("~"), x_size(50), y_size(x_size), z_size(50),  // 10m x 10m x 10m
-        x_origin(0), y_origin(0), z_origin(-0.1), 
-        horizontal_resolution(5.0/x_size), vertical_resolution(-2*z_origin) {
+        ObstacleMapper() : nh_("~") {
             
-            nh_.param("target_frame",target_frame,std::string("/VSV/mowing"));
+            nh_.param("target_frame",target_frame,std::string("/VSV/ArmPan"));
 
             first_odom = true;
             received_odom = false;
@@ -79,36 +68,15 @@ class ObstacleMapper {
             double x0 = hokuyo_tf.getOrigin().getX();
             double y0 = hokuyo_tf.getOrigin().getY();
             double z0 = hokuyo_tf.getOrigin().getZ();
-            double a = z_up.getX();
-            double b = z_up.getY();
-            double c = z_up.getZ();
+            a = z_up.getX();
+            b = z_up.getY();
+            c = z_up.getZ();
             ROS_INFO("Hokuyo reference: (%.3f %.3f %.3f) Z %.3f %.3f %.3f",
                     x0,y0,z0,a,b,c);
-            double d = -(a*x0+b*y0+c*z0);
+            d = -(a*x0+b*y0+c*z0);
             ROS_INFO("Laser plane is %.3fx + %.3fy + %.3fz + %.3f = 0",a,b,c,d);
             // tolerance: projection of horizontal half cell size to the laser plane, plus 25%)
-            laser_tolerance = 1.25 * (horizontal_resolution*fabs(a/c)/2.);
 
-            map.reset(new LocalMap(x_origin,y_origin,z_origin, horizontal_resolution, vertical_resolution, 
-                        x_size, y_size, z_size));
-
-            size_t ncells = x_size * y_size;
-            laser_height = std::vector<float>(ncells,NAN);
-            occupancy = std::vector<LevelType>(ncells,Unknown);
-            FILE * fp = fopen("/tmp/laser_height.txt","w");
-            for (size_t j=0;j<y_size;j++) {
-                size_t line = j*x_size;
-                float y = y_origin + j * horizontal_resolution;
-                for (size_t i=0;i<x_size;i++) {
-                    float x = x_origin + i * horizontal_resolution;
-                    float z = (-d - a*x - b*y)/c;
-                    if ((z >= z_origin) && (z < z_origin + vertical_resolution * z_size)) {
-                        laser_height[line + i] = z;
-                    }
-                    fprintf(fp,"%e %e %e %e\n",x,y,z,laser_height[line+i]);
-                }
-            }
-            fclose(fp);
         }
 
         void odom_callback(const geometry_msgs::PoseStampedConstPtr& msg) {
@@ -120,11 +88,11 @@ class ObstacleMapper {
             // ROS_INFO("Odom B: %.4f %.4f %.4f",odom.getOrigin().getX(),odom.getOrigin().getY(),tf::getYaw(odom.getRotation())*180./M_PI);
             if (received_odom) {
                 // then compute dx, dy, dtheta
-                tf::Transform inv = last_odom.inverse();
+                tf::Transform inv = odom.inverse();
                 // ROS_INFO("Inv Odom : %.4f %.4f %.4f",inv.getOrigin().getX(),inv.getOrigin().getY(),tf::getYaw(inv.getRotation())*180./M_PI);
                 // ROS_INFO("Odom : %.4f %.4f %.4f",odom.getOrigin().getX(),odom.getOrigin().getY(),tf::getYaw(odom.getRotation())*180./M_PI);
                 // ROS_INFO("Last Odom : %.4f %.4f %.4f",last_odom.getOrigin().getX(),last_odom.getOrigin().getY(),tf::getYaw(last_odom.getRotation())*180./M_PI);
-                Delta = inv * odom * Delta;
+                Delta = inv * last_odom * Delta;
             }
             received_odom = true;
             last_odom = odom;
@@ -132,73 +100,70 @@ class ObstacleMapper {
 
         void pc_callback(const sensor_msgs::PointCloud2ConstPtr& msg) {
             ros::Time t0 = ros::Time::now();
-            pcl::PointCloud<pcl::PointXYZ> pc;
-            pcl::fromROSMsg(*msg, pc);
-            // First prepare interpolation function
-            splines::Function f;
-            unsigned int n = pc.size();
-            for (unsigned int i=0;i<n;i++) {
-                float x = pc[i].x;
-                float y = pc[i].y;
-                float d = hypot(x,y);
-                if (d < 1e-2) {
-                    // Bogus point, ignore
-                    continue;
-                }
-                f.set(atan2(y,x),d);
-            }
-// #define PLOT_OCC
-#ifdef PLOT_OCC
-            f.print("/tmp/fd");
-            FILE *fp_occ=fopen("/tmp/occ","w"),*fp_free=fopen("/tmp/free","w");
-#endif
-            for (size_t j=0;j<y_size;j++) {
-                size_t line = j*x_size;
-                float y = y_origin + j * horizontal_resolution;
-                for (size_t i=0;i<x_size;i++) {
-                    float x = x_origin + i * horizontal_resolution;
-                    float z = laser_height[line+i];
-                    if (isnan(z)) continue;
-                    tf::Vector3 v(x,y,z);
-                    v = hokuyo_inv_tf * v;
-                    float d = hypot(v.getY(),v.getX());
-                    float theta = atan2(v.getY(),-v.getX()); // Voluntary inversion
-                    float d_laser = f(theta);
+            pcl::PointCloud<pcl::PointXYZ> temp;
+            pcl::fromROSMsg(*msg, temp);
+            // Make sure the point cloud is in the base-frame
+            listener_.waitForTransform(target_frame,msg->header.frame_id,msg->header.stamp,ros::Duration(1.0));
+            pcl_ros::transformPointCloud(target_frame,msg->header.stamp, temp, msg->header.frame_id, pc, listener_);
 
-                    // if ((fabs(y-5) < 1) && (x>4)){
-                    //     ROS_INFO("PC: %d %d %.3f %.3f %.3f",(int)j,(int)i,x,y,z);
-                    //     ROS_INFO("  : V %.3f %.3f %.3f R %.3f %.3f D %.3f",v.getX(),v.getY(),v.getZ(),theta*180./M_PI,d,d_laser);
-                    // }
-                    if (fabs(d-d_laser)<laser_tolerance) {
-                        occupancy[line+i] = Occupied;
-                    } else {
-                        occupancy[line+i] = (d<d_laser)?Free:Unknown;
-                    } 
-
-#ifdef PLOT_OCC
-                    switch (occupancy[line+i]) {
-                        case Free: fprintf(fp_free,"%e %e %e\n",x,y,z); break;
-                        case Occupied: fprintf(fp_occ,"%e %e %e\n",x,y,z); break;
-                        default: break;
+            float ds = hypot(Delta.getOrigin().getX(),Delta.getOrigin().getY());
+            ROS_INFO("Delta %.3f : %.4f %.4f %.4f",ds,Delta.getOrigin().getX(),Delta.getOrigin().getY(),tf::getYaw(Delta.getRotation())*180./M_PI);
+            if (ds > 1e-1) {
+                MapType new_map;
+                for (MapType::iterator it=map.begin();it!=map.end();it++) {
+                    float x,y,z;
+                    tf::Vector3 v = Delta * it->second; 
+                    x = v.getX(); y = v.getY(); z = v.getZ();
+                    float p = a*x+b*y+c*z+d;
+                    if (fabs(p) < 1e-2) {// TODO: set a param
+                        // ROS_INFO("Discarding point %.3f %.3f %.3f: %.3f (was %.3f %.3f %.3f)",x,y,z,p,it->second.getX(),it->second.getY(),it->second.getZ());
+                        // This point is on the laser plane. It will be updated by
+                        // this scan
+                        continue;
                     }
-#endif
+                    if ((x > -1.0) && (x < 5.0) && (y<0) && (y>-10.0)) {// TODO: set a param 
+                        new_map.insert(MapType::value_type(x,v));
+                    }
                 }
-                map->shift(Delta);
+                map = new_map;
                 Delta.setIdentity();
-                map->update(laser_height,occupancy);
-                map->plot_by_type(Occupied,"/tmp/mocc");
-                //plot.plot("splot [0:5][0:10][-0.5:5] \"/tmp/mocc\" u 1:2:3 w p");
+
+                unsigned int n = pc.size();
+                for (unsigned int i=0;i<n;i++) {
+                    float x = pc[i].x;
+                    float y = pc[i].y;
+                    float z = pc[i].z;
+                    float d2 = temp[i].x*temp[i].x+temp[i].y*temp[i].y+temp[i].z*temp[i].z;
+                    // ROS_INFO("New point p=%.3f",a*x+b*y+c*z+d);
+                    if (d2 < 5e-2) {
+                        // Bogus point, ignore
+                        continue;
+                    }
+                    if ((y>0.)||(y<-10.)||(z>10.)) { // TODO: set a param
+                        // Too far, ignore
+                        continue;
+                    }
+                    map.insert(MapType::value_type(x,tf::Vector3(x,y,z)));
+                }
             }
-#ifdef PLOT_OCC
-            fclose(fp_occ);
-            fclose(fp_free);
-            plot.plot("splot [0:5][0:10][0:10]\"/tmp/laser_height.txt\" u 1:2:4 w d, \"/tmp/occ\" u 1:2:3 w p, \"/tmp/occ\" u 1:2:(0) w p");
-#endif
             ros::Time tn = ros::Time::now();
-            ROS_INFO("Point-cloud processing: %f ms",(tn-t0).toSec());
-            // ros::shutdown();
+            ROS_INFO("Point-cloud processing: %d points %f ms",(int)map.size(),(tn-t0).toSec()*1000);
+            plot_map();
         }
         
+        void plot_map() {
+            FILE *fp = fopen("/tmp/pc","w");
+            for (MapType::const_iterator it=map.begin();it!=map.end();it++) {
+                fprintf(fp,"%e %e %e\n",it->second.getX(),it->second.getY(),it->second.getZ());
+            }
+            unsigned int n = pc.size();
+            for (unsigned int i=0;i<n;i++) {
+                fprintf(fp,"%e %e %e\n",pc[i].x,pc[i].y,pc[i].z);
+            }
+            fclose(fp);
+            plot.plot("splot [-2:5][-10:0][-1:5] \"/tmp/pc\" u 1:2:3 w p");
+            // plot.plot("splot \"/tmp/pc\" u 1:2:3 w p");
+        }
 };
 
 
