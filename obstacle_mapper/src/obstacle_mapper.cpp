@@ -29,7 +29,14 @@ class ObstacleMapper {
 
         tf::TransformListener listener_;
 
-        std::string target_frame;
+        std::string target_frame, ground_frame, laser_frame;
+        double displacement_threshold, plane_distance_threshold;
+        double min_x, max_x, min_y, max_y, min_z, max_z, min_d;
+        double occ_min_x, occ_max_x;
+        double occupancy_resolution;
+        double weight_horizontal, weight_vertical;
+        double tool_width, tool_height;
+
         float a,b,c,d; // Parameter of the laser plane
 
         bool received_odom, first_odom;
@@ -50,6 +57,29 @@ class ObstacleMapper {
         ObstacleMapper() : nh_("~") {
             
             nh_.param("target_frame",target_frame,std::string("/VSV/ArmPan"));
+            nh_.param("ground_frame",ground_frame,std::string("/VSV/base"));
+            nh_.param("laser_frame",laser_frame,std::string("/Hokuyo"));
+            nh_.param("displacement_threshold",displacement_threshold,0.1);
+            nh_.param("plane_distance_threshold",plane_distance_threshold,1e-2);
+            // Minimum length of laser rays
+            nh_.param("min_d",min_d,5e-2);
+            // Parameters of the points of interest in the laser cloud
+            nh_.param("min_x",min_x,-1.);
+            nh_.param("max_x",max_x,5.);
+            nh_.param("min_y",min_y,-10.);
+            nh_.param("max_y",max_y,0.);
+            nh_.param("min_z",min_z,0.);
+            nh_.param("max_z",max_z,10.);
+            // Paramerters of the projected occupancy
+            nh_.param("occ_min_x",occ_min_x,-0.5);
+            nh_.param("occ_max_x",occ_max_x,1.5);
+            // Parameters of the occupancy grid
+            nh_.param("occupancy_resolution",occupancy_resolution,0.1);
+            nh_.param("weight_vertical",weight_vertical,1.0);
+            nh_.param("weight_horizontal",weight_horizontal,3.0);
+            nh_.param("tool_width",tool_width,1.5);
+            nh_.param("tool_height",tool_height,0.5);
+
 
             first_odom = true;
             received_odom = false;
@@ -64,14 +94,15 @@ class ObstacleMapper {
 
             // To move the odometry estimation to the arm base
             ros::Time now = ros::Time::now();
-            listener_.waitForTransform("/VSV/base",target_frame,now,ros::Duration(3.0));
-            listener_.lookupTransform("/VSV/base",target_frame,now, base_tf);
+            listener_.waitForTransform(ground_frame,target_frame,now,ros::Duration(3.0));
+            listener_.lookupTransform(ground_frame,target_frame,now, base_tf);
 
             // Now prepare the transformation between laser and the ground
             // frame
-            listener_.waitForTransform("/Hokuyo",target_frame,now,ros::Duration(1.0));
-            listener_.lookupTransform(target_frame,"/Hokuyo",now, hokuyo_tf);
+            listener_.waitForTransform(laser_frame,target_frame,now,ros::Duration(1.0));
+            listener_.lookupTransform(target_frame,laser_frame,now, hokuyo_tf);
             hokuyo_inv_tf = hokuyo_tf.inverse();
+            // Compute the equation of the laser plane (ax+by+cz+d=0)
             const tf::Vector3 z_up = hokuyo_tf.getBasis().getColumn(2);
             double x0 = hokuyo_tf.getOrigin().getX();
             double y0 = hokuyo_tf.getOrigin().getY();
@@ -85,24 +116,23 @@ class ObstacleMapper {
             ROS_INFO("Laser plane is %.3fx + %.3fy + %.3fz + %.3f = 0",a,b,c,d);
 
 
+            // Compute the difference between the target frame and the ground level.
             z_offset = -base_tf.getOrigin().getZ();
             ROS_INFO("Z Offset: %.3f",z_offset);
-            proj_occupancy = cv::Mat_<uint8_t>(100,100,(uint8_t)0x00);
+
+            // Initialise the projected occupancy window
+            proj_occupancy = cv::Mat_<uint8_t>((int)round((max_z-min_z)/occupancy_resolution),
+                    (int)round((max_y-min_y)/occupancy_resolution),(uint8_t)0x00);
         }
 
         void odom_callback(const geometry_msgs::PoseStampedConstPtr& msg) {
             // First project the pose to the target frame (tf)
-            // And probably convert to tf::Transform
+            // And convert to tf::Transform
             tf::poseMsgToTF(msg->pose, odom);
-            // ROS_INFO("Odom : %.4f %.4f %.4f",odom.getOrigin().getX(),odom.getOrigin().getY(),tf::getYaw(odom.getRotation())*180./M_PI);
             odom *= base_tf;
-            // ROS_INFO("Odom B: %.4f %.4f %.4f",odom.getOrigin().getX(),odom.getOrigin().getY(),tf::getYaw(odom.getRotation())*180./M_PI);
             if (received_odom) {
                 // then compute dx, dy, dtheta
                 tf::Transform inv = odom.inverse();
-                // ROS_INFO("Inv Odom : %.4f %.4f %.4f",inv.getOrigin().getX(),inv.getOrigin().getY(),tf::getYaw(inv.getRotation())*180./M_PI);
-                // ROS_INFO("Odom : %.4f %.4f %.4f",odom.getOrigin().getX(),odom.getOrigin().getY(),tf::getYaw(odom.getRotation())*180./M_PI);
-                // ROS_INFO("Last Odom : %.4f %.4f %.4f",last_odom.getOrigin().getX(),last_odom.getOrigin().getY(),tf::getYaw(last_odom.getRotation())*180./M_PI);
                 Delta = inv * last_odom * Delta;
             }
             received_odom = true;
@@ -117,26 +147,31 @@ class ObstacleMapper {
             listener_.waitForTransform(target_frame,msg->header.frame_id,msg->header.stamp,ros::Duration(1.0));
             pcl_ros::transformPointCloud(target_frame,msg->header.stamp, temp, msg->header.frame_id, pc, listener_);
 
+            // Compute the displacement since last point cloud
             float ds = hypot(Delta.getOrigin().getX(),Delta.getOrigin().getY());
-            // ROS_INFO("Delta %.3f : %.4f %.4f %.4f",ds,Delta.getOrigin().getX(),Delta.getOrigin().getY(),tf::getYaw(Delta.getRotation())*180./M_PI);
-            if (ds > 1e-1) {
+            if (ds > displacement_threshold) {
+                // If the displacement is large enough, apply it to the point
+                // cloud in map
                 MapType new_map;
                 for (MapType::iterator it=map.begin();it!=map.end();it++) {
                     float x,y,z;
+                    // Apply the transform delta
                     tf::Vector3 v = Delta * it->second; 
                     x = v.getX(); y = v.getY(); z = v.getZ();
+                    // Filter out any point on the laser plane
                     float p = a*x+b*y+c*z+d;
-                    if (fabs(p) < 1e-2) {// TODO: set a param
+                    if (fabs(p) < plane_distance_threshold) {
                         // ROS_INFO("Discarding point %.3f %.3f %.3f: %.3f (was %.3f %.3f %.3f)",x,y,z,p,it->second.getX(),it->second.getY(),it->second.getZ());
                         // This point is on the laser plane. It will be updated by
                         // this scan
                         continue;
                     }
-                    if ((x > -1.0) && (x < 5.0) && (y<0) && (y>-10.0)) {// TODO: set a param 
+                    if ((x > min_x) && (x < max_x) && (y<max_y) && (y>min_y)) {
                         new_map.insert(MapType::value_type(x,v));
                     }
                 }
                 map = new_map;
+                // Don't forget to reset the displacement transform
                 Delta.setIdentity();
 
                 unsigned int n = pc.size();
@@ -144,33 +179,37 @@ class ObstacleMapper {
                     float x = pc[i].x;
                     float y = pc[i].y;
                     float z = pc[i].z;
-                    float d2 = temp[i].x*temp[i].x+temp[i].y*temp[i].y+temp[i].z*temp[i].z;
+                    float d = sqrt(temp[i].x*temp[i].x+temp[i].y*temp[i].y+temp[i].z*temp[i].z);
                     // ROS_INFO("New point p=%.3f",a*x+b*y+c*z+d);
-                    if (d2 < 5e-2) {
+                    if (d < min_d) {
                         // Bogus point, ignore
                         pc[i].x=NAN;
                         pc[i].y=NAN;
                         pc[i].z=NAN;
                         continue;
                     }
-                    if ((y>0.)||(y<-10.)||(z>10.)) { // TODO: set a param
+                    if ((y>max_y)||(y<min_y)||(z>max_z)) { 
                         // Too far, ignore
                         continue;
                     }
                     map.insert(MapType::value_type(x,tf::Vector3(x,y,z)));
                 }
             }
+            // Now project the point cloud in the map and the one in pc into an
+            // occupancy map, in the y-z plane (normal to the longitudinal
+            // axis).
+            // Set the all projected occupancy to 0xFF (Free)
             proj_occupancy = 0xFF;
             for (MapType::iterator it=map.begin();it!=map.end();it++) {
-                if ((it->first < -0.5) || (it->first > 1.5)) { // TODO: set a param, use upper_bound
+                if ((it->first < occ_min_x) || (it->first > occ_max_x)) { // TODO: use upper_bound
                     // We only consider forward collision possibilities
                     continue;
                 }
                 float y,z;
                 const tf::Vector3  & v = it->second; 
                 y = v.getY(); z = v.getZ();
-                int i = (int)round(-y/0.1);
-                int j = (int)round((z-z_offset)/0.1);
+                int i = (int)round((y-min_y)/occupancy_resolution);
+                int j = (int)round((z-z_offset-min_z)/occupancy_resolution);
                 // ROS_INFO("PC: %.3f %.3f -> %d %d",y,z,i,j);
                 if ((i<0) || (i>=proj_occupancy.cols) || (j<0) || (j>=proj_occupancy.rows)) {
                     continue;
@@ -179,17 +218,17 @@ class ObstacleMapper {
             }
             unsigned int n = pc.size();
             for (unsigned int i=0;i<n;i++) {
-                float d2 = temp[i].x*temp[i].x+temp[i].y*temp[i].y+temp[i].z*temp[i].z;
-                if (d2 < 5e-2) {
+                float d = sqrt(temp[i].x*temp[i].x+temp[i].y*temp[i].y+temp[i].z*temp[i].z);
+                if (d < min_d) {
                     continue;
                 }
                 float x,y,z;
                 x = pc[i].x; y = pc[i].y; z = pc[i].z;
-                if ((x<-0.5) || (x>1.5)) { // TODO set a param
+                if ((x < occ_min_x) || (x> occ_max_x)) { 
                     continue;
                 }
-                int i = (int)round(-y/0.1);
-                int j = (int)round((z-z_offset)/0.1);
+                int i = (int)round((y-min_y)/occupancy_resolution);
+                int j = (int)round((z-z_offset-min_z)/occupancy_resolution);
                 if ((i<0) || (i>=proj_occupancy.cols) || (j<0) || (j>=proj_occupancy.rows)) {
                     continue;
                 }
@@ -197,7 +236,8 @@ class ObstacleMapper {
             }
             int erosion_type = cv::MORPH_RECT ;
             cv::Mat element = cv::getStructuringElement(erosion_type,
-                    cv::Size(15,5), cv::Point( 7, 2));
+                    cv::Size((int)round(tool_width/occupancy_resolution),(int)round(tool_height/occupancy_resolution)),
+                    cv::Point((int)round(tool_width/(2*occupancy_resolution)), (int)round(tool_height/(2*occupancy_resolution))));
             cv::erode( proj_occupancy, proj_occupancy, element );
             cv::imshow( "OccGrid", proj_occupancy );
             ros::Time tn = ros::Time::now();
@@ -215,15 +255,6 @@ class ObstacleMapper {
                 return;
             }
             ros::Time now = ros::Time::now();
-            listener_.waitForTransform(target_frame,"/VSV/ArmPan",now,ros::Duration(1.0));
-            geometry_msgs::PointStamped Pin, Pout;
-            geometry_msgs::Point P;
-            Pin.point = *msg;
-            Pin.header.frame_id = "/VSV/ArmPan";
-            Pin.header.stamp = now;
-            listener_.transformPoint(target_frame, Pin, Pout);
-            // ROS_INFO("Target at %.2f %.2f",Pout.point.x,Pout.point.z);
-            P = Pout.point;
             cv::Mat_<float> score(proj_occupancy.size(),128.0);
 
             int ibest=-1,jbest=-1;
@@ -234,10 +265,10 @@ class ObstacleMapper {
                         score(j,i) = 0;
                     } else {
                         // score(j,i) = 0xFF*exp(-0.5*hypot(5.0*(P.x-i/0.1), 1.0*(P.z-(100.-j)/0.1))/10.);
-                        float x=i*0.1, z=z_offset + (score.rows-j)*0.1;
-                        float dx = P.x-x, dz = P.z - z;
+                        float x=min_y + i*occupancy_resolution, z=min_z + z_offset + (score.rows-j)*occupancy_resolution;
+                        float dx = -msg->x-x, dz = msg->z - z;
                         // ROS_INFO("%d %d -> %.2f %.2f -> %.2f %.2f",i,j,x,z,dx,dz);
-                        score(j,i) = exp(-hypot(3.0*dx, 1.0*dz)/10);
+                        score(j,i) = exp(-hypot(weight_horizontal*dx, weight_vertical*dz)/10);
                         if (score(j,i)>bestscore) {
                             bestscore = score(j,i);
                             ibest = i;
@@ -246,9 +277,12 @@ class ObstacleMapper {
                     }
                 }
             }
-            P.x = ibest * 0.1;
+            // Minus sign du to change of frame. TODO: see if we can get that
+            // through the TF tree
+            geometry_msgs::Point P;
+            P.x = - (min_y + ibest * occupancy_resolution);
             P.y = 0.0;
-            P.z = z_offset + (score.rows-jbest)*0.1;
+            P.z = min_z + z_offset + (score.rows-jbest)*occupancy_resolution;
             arm_target_pub_.publish(P);
             cv::imshow( "Scores", score );
         }

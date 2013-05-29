@@ -4,6 +4,24 @@
   <ignore launch-prefix="gdb -ex run --args"/>
   <node pkg="obstacle_mapper" type="obstacle_mapper" name="obstacle_mapper" output="screen" >
       <param name="target_frame" value="/VSV/ArmPan"/>
+      <param name="laser_frame" value="/Hokuyo"/>
+      <param name="ground_frame" value="/VSV/base"/>
+      <param name="displacement_threshold" value="0.1"/>
+      <param name="plane_distance_threshold" value="1e-2"/>
+      <param name="min_d" value="5e-2"/>
+      <param name="min_x" value="-1.0"/>
+      <param name="max_x" value="5.0"/>
+      <param name="min_y" value="-10.0"/>
+      <param name="max_y" value="0.0"/>
+      <param name="min_z" value="0.0"/>
+      <param name="max_z" value="10.0"/>
+      <param name="occ_min_x" value="-0.5"/>
+      <param name="occ_max_x" value="1.5"/>
+      <param name="occupancy_resolution" value="0.1"/>
+      <param name="weight_vertical" value="1.0"/>
+      <param name="weight_horizontal" value="3.0"/>
+      <param name="tool_width" value="1.5"/>
+      <param name="tool_height" value="0.5"/>
       <remap from="/obstacle_mapper/scan" to="/vrep/hokuyoSensor"/>
       <remap from="/obstacle_mapper/odom" to="/odom/odom"/>
       <remap from="/obstacle_mapper/position_desired" to="/arm_ik/position"/>
