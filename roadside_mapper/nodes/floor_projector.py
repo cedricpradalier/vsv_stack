@@ -26,7 +26,7 @@ class FloorMapper:
         self.horizon_offset = rospy.get_param("~horizon_offset_pix",20)
         self.vertical_offset = rospy.get_param("~vertical_offset_pix",0)
 
-        self.floor_map = cv.CreateImage( (image_size,image_size), 8, 1)
+        self.floor_map = cv.CreateImage( (image_size,image_size), 8, 3)
         self.x_floor = 0.0
         self.y_floor = self.floor_map.height / 2.0 + self.vertical_offset
         self.floor_scale = self.floor_map.width / image_extent
@@ -45,7 +45,7 @@ class FloorMapper:
             return
         # print "Processing"
         self.timestamp = proba.header.stamp
-        I = self.br.imgmsg_to_cv(proba,"8UC1")
+        I = self.br.imgmsg_to_cv(proba,"rgb8")
         self.proba = cv.CloneMat(I)
         cv.Threshold(I,self.proba,0xFE,0xFE,cv.CV_THRESH_TRUNC)
         try:
@@ -79,9 +79,9 @@ class FloorMapper:
             # print numpy.asarray(self.H)
 
             cv.WarpPerspective(cv.GetSubRect(self.proba,(0,self.horizon_offset,self.proba.width,self.proba.height-self.horizon_offset)),
-                    self.floor_map,self.H, flags=cv.CV_INTER_NN+cv.CV_WARP_FILL_OUTLIERS , fillval=0xFF)
+                    self.floor_map,self.H, flags=cv.CV_INTER_NN+cv.CV_WARP_FILL_OUTLIERS , fillval=0x00)
 
-            msg = self.br.cv_to_imgmsg(self.floor_map)
+            msg = self.br.cv_to_imgmsg(self.floor_map,encoding='rgb8')
             msg.header.stamp = proba.header.stamp
             msg.header.frame_id = self.target_frame
             self.pub.publish(msg)
